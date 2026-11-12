@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="sv"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Önskelistan</title>
+<style>
+:root{--bg:#faf6f1;--card:#fff;--tx:#2a2420;--mu:#7a6f66;--ac:#c2410c;--ac2:#fff;--bd:#e8dfd5;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1816;--card:#2a2522;--tx:#f3ece4;--mu:#a89c90;--ac:#fb923c;--ac2:#1c1816;--bd:#3d3631;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.7rem;margin:.2em 0}.mu{color:var(--mu);font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0}
+input{width:100%;padding:11px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit;margin:4px 0}
+button{background:var(--ac);color:var(--ac2);border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+button.g{background:transparent;color:var(--mu);border:1px solid var(--bd);font-weight:500;padding:6px 10px;font-size:.85rem}
+button:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:center}.row>input{flex:1}
+.item{display:flex;gap:12px;align-items:center}
+.item .info{flex:1;min-width:0}.item b{display:block;overflow-wrap:anywhere}
+.price{font-weight:700;white-space:nowrap;color:var(--ac)}
+.img{width:84px;height:84px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);object-fit:contain;flex:none;display:flex;align-items:center;justify-content:center;color:var(--mu);font-size:.7rem;text-align:center;overflow:hidden}
+.prev{display:flex;gap:12px;align-items:center;margin-top:8px}
+a{color:var(--ac)}.hide{display:none!important}.tot{text-align:right;font-weight:600}
+.note{font-size:.85rem;color:var(--mu);margin:4px 0}
+</style></head><body><main>
+<div id="app">
+ <h1 id="title">Min önskelista</h1>
+ <div id="viewer" class="card hide">Du tittar på någon annans lista. <button class="g" id="mine">Öppna min egen lista</button></div>
+ <div id="share" class="row"><button id="copy">Kopiera delningslänk</button><span class="mu" id="copied"></span></div>
+ <div id="own">
+  <div class="card"><label class="mu">Listans namn</label>
+   <input id="ttl" placeholder="T.ex. Annas önskelista" maxlength="60"></div>
+  <div class="card">
+   <b>Lägg till önskning</b>
+   <div class="row"><input id="url" type="url" placeholder="Klistra in produktlänk"><button id="fetch">Hämta</button></div>
+   <div id="st" class="note"></div>
+   <div id="manual" class="hide">
+    <div class="prev"><span id="pwrap"><div class="img">Ingen bild</div></span>
+     <div style="flex:1"><input id="nm" placeholder="Produktnamn" maxlength="120">
+     <input id="pr" placeholder="Pris (kr)" inputmode="decimal" maxlength="12"></div></div>
+    <input id="im" type="url" placeholder="Bildlänk (valfritt)">
+    <button id="save">Lägg till</button>
+   </div>
+   <button class="g" id="mbtn" style="margin-top:6px">Fyll i manuellt</button>
+  </div>
+ </div>
+ <div id="list"></div><div id="total" class="tot"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const KEY='onskelista-v1';
+let data={title:'',items:[]},isOwn=true;
+function load(){try{return JSON.parse(localStorage.getItem(KEY))||null}catch(e){return null}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){$('st').textContent='Kunde inte spara i webbläsaren.'}}
+function enc(o){return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(o)))))}
+function dec(s){return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(s)))))}
+function fmt(p){return p===''||p==null||isNaN(p)?'':new Intl.NumberFormat('sv-SE').format(p)+' kr'}
+function hostOf(u){try{return new URL(u).hostname.replace(/^www\./,'')}catch(e){return ''}}
+function safeUrl(u){try{const x=new URL(u);return /^https?:$/.test(x.protocol)?x.href:''}catch(e){return ''}}
+function imgHtml(src,cls){return src?'<img class="img" referrerpolicy="no-referrer" src="'+esc(src)+'" alt="" onerror="this.outerHTML=\'<div class=&quot;img&quot;>Ingen bild</div>\'">':'<div class="img">Ingen bild</div>'}
+function render(){
+ $('title').textContent=data.title||(isOwn?'Min önskelista':'Önskelista');
+ $('own').classList.toggle('hide',!isOwn);$('share').classList.toggle('hide',!isOwn);$('viewer').classList.toggle('hide',isOwn);
+ if(isOwn&&document.activeElement!==$('ttl'))$('ttl').value=data.title||'';
+ const L=$('list');
+ if(!data.items.length){L.innerHTML='<div class="card mu">'+(isOwn?'Inga önskningar ännu. Lägg till din första ovan!':'Listan är tom just nu.')+'</div>';$('total').textContent='';return}
+ L.innerHTML=data.items.map(i=>{const u=safeUrl(i.url);return '<div class="card item">'+imgHtml(safeUrl(i.img))+'<div class="info"><b>'+(u?'<a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(i.name)+'</a>':esc(i.name))+'</b>'+(u?'<span class="mu">'+esc(hostOf(u))+'</span>':'')+'</div><div style="text-align:right"><div class="price">'+esc(fmt(i.price))+'</div>'+(isOwn?'<button class="g" data-d="'+esc(i.id)+'">Ta bort</button>':'')+'</div></div>'}).join('');
+ const s=data.items.reduce((a,i)=>a+(Number(i.price)||0),0);
+ $('total').textContent=s?'Totalt: '+fmt(s):'';
+}
+function addItem(name,price,url,img){
+ data={...data,items:[...data.items,{id:Date.now().toString(36),name,price:price===''?'':Number(price),url:url||'',img:img||''}]};
+ persist();render();
+}
+function showManual(nm,pr,im){$('manual').classList.remove('hide');$('mbtn').classList.add('hide');$('nm').value=nm||'';$('pr').value=pr||'';$('im').value=im||'';prev()}
+function prev(){$('pwrap').innerHTML=imgHtml(safeUrl($('im').value.trim()))}
+async function viaProxy(u){
+ const ps=['https://api.allorigins.win/raw?url=','https://corsproxy.io/?url='];
+ for(const p of ps){
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),9000);
+  try{const r=await fetch(p+encodeURIComponent(u),{signal:c.signal});clearTimeout(t);if(r.ok){const x=await r.text();if(x&&x.length>200)return x}}catch(e){clearTimeout(t)}
+ }
+ return null;
+}
+function parse(html,base){
+ const d=new DOMParser().parseFromString(html,'text/html');
+ const m=n=>{const e=d.querySelector('meta[property="'+n+'"],meta[name="'+n+'"],meta[itemprop="'+n+'"]');return e?e.getAttribute('content'):''};
+ let name=m('og:title')||m('twitter:title')||(d.title||''),img=m('og:image')||m('twitter:image'),price=m('product:price:amount')||m('og:price:amount')||m('price');
+ d.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{
+  try{const walk=o=>{if(!o||typeof o!=='object')return;if(Array.isArray(o))return o.forEach(walk);
+   if(/Product/.test([].concat(o['@type']||[]).join())){if(o.name&&!name)name=o.name;
+    if(!img&&o.image)img=[].concat(o.image)[0].url||[].concat(o.image)[0];
+    const of=[].concat(o.offers||[])[0];if(of&&!price)price=of.price||(of.priceSpecification&&of.priceSpecification.price)||of.lowPrice}
+   if(o['@graph'])walk(o['@graph'])};walk(JSON.parse(s.textContent))}catch(e){}});
+ try{if(img)img=new URL(img,base).href}catch(e){}
+ price=String(price||'').replace(/\s/g,'').replace(/,(\d{1,2})$/,'.$1').replace(/[^\d.]/g,'');
+ return{name:(name||'').trim(),img:img||'',price:price&&!isNaN(price)?Number(price):''};
+}
+async function tryFetch(){
+ const u=$('url').value.trim();
+ if(!safeUrl(u)){$('st').textContent='Klistra in en hel länk som börjar med https://';return}
+ $('fetch').disabled=true;$('st').textContent='Läser av produkten…';
+ const html=await viaProxy(u);$('fetch').disabled=false;
+ const r=html?parse(html,u):null;
+ if(r&&r.name&&r.price!==''){showManual(r.name,r.price,r.img);$('st').textContent='Hittade produkten. Kontrollera uppgifterna och tryck "Lägg till".';return}
+ $('st').textContent=r&&r.name?'Hittade namn men inte pris. Fyll i resten själv:':'Kunde inte läsa av produkten automatiskt. Fyll i uppgifterna manuellt:';
+ showManual(r?r.name:'','',r?r.img:'');
+}
+function wire(){
+ $('fetch').onclick=tryFetch;
+ $('url').onkeydown=e=>{if(e.key==='Enter')tryFetch()};
+ $('mbtn').onclick=()=>showManual();
+ $('im').oninput=prev;
+ $('save').onclick=()=>{
+  const n=$('nm').value.trim();if(!n){$('nm').focus();return}
+  const p=$('pr').value.replace(/\s/g,'').replace(',','.');
+  addItem(n,p&&!isNaN(p)?p:'',safeUrl($('url').value.trim()),safeUrl($('im').value.trim()));
+  ['nm','pr','im','url'].forEach(i=>$(i).value='');$('st').textContent='Tillagd!';
+  $('manual').classList.add('hide');$('mbtn').classList.remove('hide');
+ };
+ $('ttl').oninput=()=>{data={...data,title:$('ttl').value};persist();$('title').textContent=data.title||'Min önskelista'};
+ $('list').onclick=e=>{const d=e.target.dataset&&e.target.dataset.d;if(!d)return;data={...data,items:data.items.filter(i=>i.id!==d)};persist();render()};
+ $('copy').onclick=async()=>{
+  const link=location.href.split('#')[0]+'#l='+enc(data);
+  try{await navigator.clipboard.writeText(link);$('copied').textContent='Kopierad!'}catch(e){prompt('Kopiera länken:',link)}
+ };
+ $('mine').onclick=()=>{history.replaceState(null,'',location.pathname+location.search);init()};
+}
+function init(){
+ const h=location.hash.slice(1);
+ if(h.indexOf('l=')===0){
+  try{const o=dec(h.slice(2));data={title:String(o.title||''),items:Array.isArray(o.items)?o.items:[]};isOwn=false;render();return}catch(e){}
+ }
+ isOwn=true;data=load()||{title:'',items:[]};render();
+}
+wire();init();
+window.addEventListener('hashchange',init);
+</script></main></body></html>
